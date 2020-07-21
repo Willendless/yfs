@@ -130,7 +130,20 @@ inode_manager::free_inode(uint32_t inum)
    * note: you need to check if the inode is already a freed one;
    * if not, clear it, and remember to write back to disk.
    */
+  struct inode *ino;
 
+  if ((ino = get_inode(inum)) == NULL) {
+    return;
+  }
+
+  if (ino->size > NDIRECT * BLOCK_SIZE) {
+    bm->free_block(ino->blocks[NDIRECT]);
+  }
+
+  memset(ino, 0, sizeof(struct inode));
+
+  bm->write_block(IBLOCK(inum, bm->sb.nblocks), (char *)ino);
+  free(ino);
   return;
 }
 
@@ -255,6 +268,7 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
   char padding_block[BLOCK_SIZE];
   unsigned int cur_block;
   unsigned int write_so_far = 0;
+
   if ((ino = get_inode(inum)) == NULL) {
     return;
   }
@@ -364,7 +378,10 @@ inode_manager::getattr(uint32_t inum, extent_protocol::attr &a)
    * note: get the attributes of inode inum.
    * you can refer to "struct attr" in extent_protocol.h
    */
-  inode* inode = get_inode(inum);
+  inode* inode;
+  if ((inode = get_inode(inum)) == NULL) {
+    return;
+  }
   a.atime = inode->atime;
   a.ctime = inode->ctime;
   a.mtime = inode->mtime;
@@ -381,6 +398,30 @@ inode_manager::remove_file(uint32_t inum)
    * your code goes here
    * note: you need to consider about both the data block and inode of the file
    */
-  
+
+  struct inode *ino;
+  unsigned int freed_so_far;
+  uint32_t indirect_block[BLOCK_SIZE / sizeof(uint32_t)];
+
+  if ((ino = get_inode(inum)) == NULL) {
+    return;
+  }
+
+  for (freed_so_far = 0;
+       freed_so_far < ino->size && freed_so_far < NDIRECT * BLOCK_SIZE;
+       freed_so_far += BLOCK_SIZE) {
+    bm->free_block(ino->blocks[freed_so_far/BLOCK_SIZE]);
+  }
+
+  if (freed_so_far < ino->size) {
+    bm->read_block(ino->blocks[NDIRECT], (char *)indirect_block);
+    uint32_t *bp = indirect_block;
+    for (; freed_so_far < ino->size; freed_so_far += BLOCK_SIZE, ++bp) {
+      bm->free_block(*bp);
+    }
+  }
+
+  free(ino);
+  free_inode(inum);
   return;
 }
