@@ -139,12 +139,48 @@ yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out)
 {
     int r = OK;
 
+    printf("> yfs_client::create: parent inum: %016llx, file name: %s\n", parent, name);
     /*
      * your code goes here.
      * note: lookup is what you need to check if file exist;
      * after create file or dir, you must remember to modify the parent infomation.
      */
 
+    // check if file exists
+    bool found;
+    inum _inum;
+    yfs_client::dirent new_dirent;
+    std::string directory_content;
+
+    lookup(parent, name, found, _inum);
+    if (found) {
+        r = EXIST;
+        goto release;
+    }
+
+    if (ec->create(extent_protocol::T_FILE, ino_out)
+            != extent_protocol::OK) {
+        r = IOERR;
+        goto release;
+    }
+
+    // add dirent to parent
+    new_dirent.name = std::string(name);
+    new_dirent.inum = ino_out;
+    if (ec->get(parent, directory_content) != extent_protocol::OK) {
+        r = IOERR;
+        goto release;
+    }
+    directory_content += new_dirent.dirent_disk();
+
+    std::cout << "yfs_client::create finish: directory_content: "
+              << directory_content << std::endl;
+    if (ec->put(parent, directory_content) != extent_protocol::OK) {
+        r = IOERR;
+        goto release;
+    }
+
+release:
     return r;
 }
 
@@ -153,6 +189,7 @@ yfs_client::mkdir(inum parent, const char *name, mode_t mode, inum &ino_out)
 {
     int r = OK;
 
+    printf("> yfs_client::mkdir parent inum: %016llx, file name: %s\n", parent, name);
     /*
      * your code goes here.
      * note: lookup is what you need to check if directory exist;
@@ -166,13 +203,30 @@ int
 yfs_client::lookup(inum parent, const char *name, bool &found, inum &ino_out)
 {
     int r = OK;
+    std::string fname(name);
+    std::list<dirent> list;
+    std::list<dirent>::iterator it;
+    printf("> yfs_client::lookup parent inum: %016llx, file name: %s\n", parent, name);
 
     /*
      * your code goes here.
      * note: lookup file from parent dir according to name;
      * you should design the format of directory content.
      */
+    if ((r = readdir(parent, list)) != OK) {
+        return r;
+    }
 
+    for (it = list.begin(); it != list.end(); ++it) {
+        if (fname == it->name) {
+            found = true;
+            ino_out = it->inum;
+            return r;
+        }
+    }
+
+    found = false;
+    printf("> yfs_client::lookup: finish\n");
     return r;
 }
 
@@ -180,6 +234,7 @@ int
 yfs_client::readdir(inum dir, std::list<dirent> &list)
 {
     int r = OK;
+    printf("> yfs_client::readdir: dir: %016llx\n", dir);
 
     /*
      * your code goes here.
@@ -187,6 +242,43 @@ yfs_client::readdir(inum dir, std::list<dirent> &list)
      * and push the dirents to the list.
      */
 
+    unsigned int i = 0;
+    std::string buf;
+    if (ec->get(dir, buf) != extent_protocol::OK) {
+        r = IOERR;
+        goto release;
+    }
+
+    // parse directory
+    std::cout << "directory content: " << buf << std::endl;
+    while (i < buf.size()) {
+        unsigned int dirent_size = 0;
+        unsigned int name_size   = 0;
+        int l = i, r;
+        dirent dirent;
+        // read dirent size
+        while (buf[i++] != ' ') ;
+        r = i - 1;
+        std::istringstream is1(buf.substr(l, r - l));
+        is1 >> dirent_size;
+        // read name size
+        l = i;
+        while (buf[i++] != '/') ;
+        r = i - 1;
+        std::istringstream is2(buf.substr(l, r - l));
+        is2 >> name_size;
+
+        std::cout << i << " " << dirent_size
+                  << " " << name_size << std::endl;
+        dirent.name = buf.substr(i, name_size);
+        i += name_size;
+        dirent.inum = n2i(buf.substr(i, dirent_size - name_size));
+        i += dirent_size - name_size;
+        list.push_back(dirent);
+    }
+
+release:
+    printf("> yfs_client::readir: finish\n");
     return r;
 }
 
@@ -194,6 +286,9 @@ int
 yfs_client::read(inum ino, size_t size, off_t off, std::string &data)
 {
     int r = OK;
+
+    printf("> yfs_client::read: ino: %016llx\n", ino);
+
 
     /*
      * your code goes here.
@@ -209,6 +304,7 @@ yfs_client::write(inum ino, size_t size, off_t off, const char *data,
 {
     int r = OK;
 
+    printf("> yfs_client::write: ino: %016llx\n", ino);
     /*
      * your code goes here.
      * note: write using ec->put().
@@ -230,4 +326,3 @@ int yfs_client::unlink(inum parent,const char *name)
 
     return r;
 }
-

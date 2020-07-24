@@ -114,6 +114,7 @@ inode_manager::alloc_inode(uint32_t type)
     inode_disk = (struct inode*)block + i%IPB;
     if (inode_disk->type == 0) {
       inode_disk->type = type;
+      inode_disk->size = 0;
       put_inode(i, inode_disk);
       return i;
     }
@@ -218,6 +219,13 @@ inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
   }
 
   file_len = ino->size;
+
+  if (!file_len) {
+    buf = (char *)malloc(1);
+    buf[0] = '\0';
+    return;
+  }
+
   buf = (char *)malloc(file_len);
   buf_p = buf;
   for (unsigned int b = 0; read_so_far < file_len && b < NDIRECT;
