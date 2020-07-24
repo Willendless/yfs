@@ -208,10 +208,11 @@ inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
    * and copy them to buf_Out
    */
   char *buf, *buf_p;
-  uint32_t block[BLOCK_SIZE];
+  uint32_t block[BLOCK_SIZE / sizeof(uint32_t)];
   struct inode* ino;
   unsigned int file_len;
   unsigned int read_so_far = 0;
+
 
   if ((ino = get_inode(inum)) == NULL) {
     *buf_out = NULL;
@@ -226,7 +227,7 @@ inode_manager::read_file(uint32_t inum, char **buf_out, int *size)
     return;
   }
 
-  buf = (char *)malloc(file_len);
+  buf = (char *)malloc(file_len + 1);
   buf_p = buf;
   for (unsigned int b = 0; read_so_far < file_len && b < NDIRECT;
        read_so_far += BLOCK_SIZE, ++b) {
@@ -284,6 +285,8 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
   unsigned int block_need = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
   unsigned int block_had  = (ino->size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
+  printf("block_need: %d, block_had: %d\n", block_need, block_had);
+
   for (cur_block = 0; cur_block < MIN(block_need, MIN(block_had, NDIRECT));
        ++cur_block) {
     if (size - write_so_far > BLOCK_SIZE) {
@@ -326,7 +329,7 @@ inode_manager::write_file(uint32_t inum, const char *buf, int size)
       } else {
         alloc_b = bm->alloc_block();
         ino->blocks[NDIRECT] = alloc_b;
-        for (; cur_block < block_had; ++cur_block) {
+        for (; cur_block < block_need; ++cur_block) {
           alloc_b = block[cur_block - NDIRECT] = bm->alloc_block();
           if (size - write_so_far > BLOCK_SIZE) {
             bm->write_block(alloc_b, buf);

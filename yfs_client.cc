@@ -124,6 +124,8 @@ int
 yfs_client::setattr(inum ino, size_t size)
 {
     int r = OK;
+    extent_protocol::attr attr;
+    std::string buf;
 
     /*
      * your code goes here.
@@ -131,6 +133,27 @@ yfs_client::setattr(inum ino, size_t size)
      * according to the size (<, =, or >) content length.
      */
 
+    if (ec->getattr(ino, attr) != extent_protocol::OK) {
+        r = IOERR;
+        goto release;
+    }
+
+    if (attr.size == size) goto release;
+
+    if (ec->get(ino, buf) != extent_protocol::OK) {
+        r = IOERR;
+        goto release;
+    }
+
+    if (attr.size < size) {
+        ec->put(ino, buf.append(size - attr.size, '\0'));
+    }
+
+    if (attr.size > size) {
+        ec->put(ino, buf.substr(0, size));
+    }
+
+release:
     return r;
 }
 
@@ -214,18 +237,21 @@ yfs_client::lookup(inum parent, const char *name, bool &found, inum &ino_out)
      * you should design the format of directory content.
      */
     if ((r = readdir(parent, list)) != OK) {
-        return r;
+        goto release;
     }
 
     for (it = list.begin(); it != list.end(); ++it) {
         if (fname == it->name) {
             found = true;
             ino_out = it->inum;
-            return r;
+            goto release;
         }
     }
 
+    r = NOENT;
     found = false;
+
+release:
     printf("> yfs_client::lookup: finish\n");
     return r;
 }
@@ -254,19 +280,18 @@ yfs_client::readdir(inum dir, std::list<dirent> &list)
     while (i < buf.size()) {
         unsigned int dirent_size = 0;
         unsigned int name_size   = 0;
-        int l = i, r;
         dirent dirent;
+
         // read dirent size
-        while (buf[i++] != ' ') ;
-        r = i - 1;
-        std::istringstream is1(buf.substr(l, r - l));
-        is1 >> dirent_size;
+        for (; buf[i] != ' '; ++i) {
+            dirent_size = dirent_size * 10 + buf[i] - '0';
+        }
+        ++i;
         // read name size
-        l = i;
-        while (buf[i++] != '/') ;
-        r = i - 1;
-        std::istringstream is2(buf.substr(l, r - l));
-        is2 >> name_size;
+        for (; buf[i] != '/'; ++i) {
+            name_size = name_size * 10 + buf[i] - '0';
+        }
+        ++i;
 
         std::cout << i << " " << dirent_size
                   << " " << name_size << std::endl;
@@ -286,15 +311,46 @@ int
 yfs_client::read(inum ino, size_t size, off_t off, std::string &data)
 {
     int r = OK;
+    std::string buf;
+    extent_protocol::attr attr;
+    unsigned int off_to_end;
+    unsigned int read_len;
 
-    printf("> yfs_client::read: ino: %016llx\n", ino);
-
+    printf("> yfs_client::read: ino: %016llx, off: %ld, size: %lu\n", ino, off, size);
 
     /*
      * your code goes here.
      * note: read using ec->get().
      */
+    if (ec->getattr(ino, attr) != extent_protocol::OK) {
+        r = IOERR;
+        goto release;
+    }
 
+    std::cout << "> read file's size: " << attr.size  << std::endl;
+
+    if (ec->get(ino, buf) != extent_protocol::OK) {
+        r = IOERR;
+        goto release;
+    }
+
+    if (off > attr.size) {
+        data = "";
+        goto release;
+    }
+
+    std::cout << "> yfs_client::read:"
+              << " origin size: " << buf.size()
+              << " file content: " << buf << std::endl;
+
+    off_to_end = buf.size() - off;
+    read_len = off_to_end < size ? off_to_end : size;
+    data = buf.substr(off, read_len);
+
+    std::cout << "> yfs_client::read finish: size: " << data.size()
+              << "read content " << data << std::endl;
+
+release:
     return r;
 }
 
@@ -303,14 +359,53 @@ yfs_client::write(inum ino, size_t size, off_t off, const char *data,
         size_t &bytes_written)
 {
     int r = OK;
+    std::string buf;
+    std::string new_content(data);
+    extent_protocol::attr attr;
+    unsigned int enlarged_len;
 
-    printf("> yfs_client::write: ino: %016llx\n", ino);
+    printf("> yfs_client::write: ino: %016llx, off: %lu, size: %lu", ino, off, size);
     /*
      * your code goes here.
      * note: write using ec->put().
      * when off > length of original file, fill the holes with '\0'.
      */
 
+    if (ec->getattr(ino, attr) != extent_protocol::OK) {
+        r = IOERR;
+        bytes_written = 0;
+        goto release;
+    }
+
+    if (ec->get(ino, buf) != extent_protocol::OK) {
+        r = IOERR;
+        bytes_written = 0;
+        goto release;
+    }
+    enlarged_len = off + size > attr.size ? 
+                    off + size - attr.size :
+                    0;
+    
+    std::cout << "> write: file old size: " << buf.size() << std::endl;
+    std::cout << "> write: file old content: " << buf << std::endl;
+    buf.append(enlarged_len, 0);
+    buf.replace(off, size, data, size);
+    std::cout << "> write: file new size: " << buf.size() << std::endl;
+    std::cout << "> write: file new content: " << buf << std::endl;
+    if (ec->put(ino, buf) != extent_protocol::OK) {
+        r = IOERR;
+        bytes_written = 0;
+        goto release;
+    }
+
+    bytes_written = size;
+
+    std::cout << "> write: file new size " << buf.size() << std::endl;
+    std::cout << "> yfs_client::write finish: "
+              << "file new size: " << buf.size()
+              << "new file content: " << buf << std::endl;
+
+release:
     return r;
 }
 
