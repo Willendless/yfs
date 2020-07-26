@@ -133,24 +133,18 @@ yfs_client::setattr(inum ino, size_t size)
      * according to the size (<, =, or >) content length.
      */
 
-    if (ec->getattr(ino, attr) != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
-    }
+    EXT_RPC(ec->getattr(ino, attr));
 
     if (attr.size == size) goto release;
 
-    if (ec->get(ino, buf) != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
-    }
+    EXT_RPC(ec->get(ino, buf));
 
     if (attr.size < size) {
-        ec->put(ino, buf.append(size - attr.size, '\0'));
+        EXT_RPC(ec->put(ino, buf.append(size - attr.size, '\0')));
     }
 
     if (attr.size > size) {
-        ec->put(ino, buf.substr(0, size));
+        EXT_RPC(ec->put(ino, buf.substr(0, size)));
     }
 
 release:
@@ -181,27 +175,18 @@ yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out)
         goto release;
     }
 
-    if (ec->create(extent_protocol::T_FILE, ino_out)
-            != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
-    }
+    EXT_RPC(ec->create(extent_protocol::T_FILE, ino_out));
 
     // add dirent to parent
     new_dirent.name = std::string(name);
     new_dirent.inum = ino_out;
-    if (ec->get(parent, directory_content) != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
-    }
+    EXT_RPC(ec->get(parent, directory_content));
     directory_content += new_dirent.dirent_disk();
 
     std::cout << "yfs_client::create finish: directory_content: "
               << directory_content << std::endl;
-    if (ec->put(parent, directory_content) != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
-    }
+    
+    EXT_RPC(ec->put(parent, directory_content));
 
 release:
     return r;
@@ -270,10 +255,7 @@ yfs_client::readdir(inum dir, std::list<dirent> &list)
 
     unsigned int i = 0;
     std::string buf;
-    if (ec->get(dir, buf) != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
-    }
+    EXT_RPC(ec->get(dir, buf));
 
     // parse directory
     std::cout << "directory content: " << buf << std::endl;
@@ -322,17 +304,14 @@ yfs_client::read(inum ino, size_t size, off_t off, std::string &data)
      * your code goes here.
      * note: read using ec->get().
      */
-    if (ec->getattr(ino, attr) != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
-    }
+
+    data = "";
+
+    EXT_RPC(ec->getattr(ino, attr));
 
     std::cout << "> read file's size: " << attr.size  << std::endl;
 
-    if (ec->get(ino, buf) != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
-    }
+    EXT_RPC(ec->get(ino, buf));
 
     if (off > attr.size) {
         data = "";
@@ -370,18 +349,12 @@ yfs_client::write(inum ino, size_t size, off_t off, const char *data,
      * note: write using ec->put().
      * when off > length of original file, fill the holes with '\0'.
      */
+    bytes_written = 0;
 
-    if (ec->getattr(ino, attr) != extent_protocol::OK) {
-        r = IOERR;
-        bytes_written = 0;
-        goto release;
-    }
+    EXT_RPC(ec->getattr(ino, attr));
 
-    if (ec->get(ino, buf) != extent_protocol::OK) {
-        r = IOERR;
-        bytes_written = 0;
-        goto release;
-    }
+    EXT_RPC(ec->get(ino, buf));
+
     enlarged_len = off + size > attr.size ? 
                     off + size - attr.size :
                     0;
@@ -391,12 +364,8 @@ yfs_client::write(inum ino, size_t size, off_t off, const char *data,
     buf.append(enlarged_len, 0);
     buf.replace(off, size, data, size);
     std::cout << "> write: file new size: " << buf.size() << std::endl;
-    std::cout << "> write: file new content: " << buf << std::endl;
-    if (ec->put(ino, buf) != extent_protocol::OK) {
-        r = IOERR;
-        bytes_written = 0;
-        goto release;
-    }
+
+    EXT_RPC(ec->put(ino, buf));
 
     bytes_written = size;
 

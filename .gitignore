@@ -31,3 +31,8 @@
 *.out
 *.app
 
+# yfs related file
+yfs*/
+*.log
+core
+part2_test.sh
