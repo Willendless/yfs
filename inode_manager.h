@@ -54,8 +54,9 @@ class block_manager {
 #define IPB           1
 //(BLOCK_SIZE / sizeof(struct inode))
 
-// Block containing inode i
+// Block containing inode i(inode number -> blocknumber)
 #define IBLOCK(i, nblocks)     ((nblocks)/BPB + (i)/IPB + 3)
+// nblocks决定block bitmap的block数
 
 // Bitmap bits per block
 #define BPB           (BLOCK_SIZE*8)
@@ -93,4 +94,3 @@ class inode_manager {
 };
 
 #endif
-

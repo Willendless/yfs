@@ -29,6 +29,20 @@ class yfs_client {
   struct dirent {
     std::string name;
     yfs_client::inum inum;
+
+    std::string dirent_disk() {
+      std::string inum_str;
+      std::string dirent_size;
+      std::string name_size;
+      std::ostringstream ost1, ost2;
+
+      inum_str = filename(inum);
+      ost1 << name.size() + inum_str.size();
+      dirent_size = ost1.str();
+      ost2 << name.size();
+      name_size = ost2.str();
+      return dirent_size + " " + name_size + "/" + name + inum_str;
+    } 
   };
 
  private:

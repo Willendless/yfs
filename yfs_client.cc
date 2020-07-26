@@ -124,6 +124,8 @@ int
 yfs_client::setattr(inum ino, size_t size)
 {
     int r = OK;
+    extent_protocol::attr attr;
+    std::string buf;
 
     /*
      * your code goes here.
@@ -131,6 +133,21 @@ yfs_client::setattr(inum ino, size_t size)
      * according to the size (<, =, or >) content length.
      */
 
+    EXT_RPC(ec->getattr(ino, attr));
+
+    if (attr.size == size) goto release;
+
+    EXT_RPC(ec->get(ino, buf));
+
+    if (attr.size < size) {
+        EXT_RPC(ec->put(ino, buf.append(size - attr.size, '\0')));
+    }
+
+    if (attr.size > size) {
+        EXT_RPC(ec->put(ino, buf.substr(0, size)));
+    }
+
+release:
     return r;
 }
 
@@ -139,12 +156,39 @@ yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out)
 {
     int r = OK;
 
+    printf("> yfs_client::create: parent inum: %016llx, file name: %s\n", parent, name);
     /*
      * your code goes here.
      * note: lookup is what you need to check if file exist;
      * after create file or dir, you must remember to modify the parent infomation.
      */
 
+    // check if file exists
+    bool found;
+    inum _inum;
+    yfs_client::dirent new_dirent;
+    std::string directory_content;
+
+    lookup(parent, name, found, _inum);
+    if (found) {
+        r = EXIST;
+        goto release;
+    }
+
+    EXT_RPC(ec->create(extent_protocol::T_FILE, ino_out));
+
+    // add dirent to parent
+    new_dirent.name = name;
+    new_dirent.inum = ino_out;
+    EXT_RPC(ec->get(parent, directory_content));
+    directory_content.append(new_dirent.dirent_disk());
+
+    std::cout << "yfs_client::create finish: directory_content: "
+              << directory_content << std::endl;
+    
+    EXT_RPC(ec->put(parent, directory_content));
+
+release:
     return r;
 }
 
@@ -153,12 +197,34 @@ yfs_client::mkdir(inum parent, const char *name, mode_t mode, inum &ino_out)
 {
     int r = OK;
 
+    printf("> yfs_client::mkdir parent inum: %016llx, file name: %s\n", parent, name);
     /*
      * your code goes here.
      * note: lookup is what you need to check if directory exist;
      * after create file or dir, you must remember to modify the parent infomation.
      */
+    bool found;
+    inum _;
+    dirent new_dirent;
+    std::string directory;
 
+    EXT_RPC(lookup(parent, name, found, _));
+
+    if (found) {
+        r = EXIST;
+        goto release;
+    }
+
+    EXT_RPC(ec->create(extent_protocol::T_DIR, ino_out));
+
+    // add dirent to parent
+    new_dirent.name = name;
+    new_dirent.inum = ino_out;
+    EXT_RPC(ec->get(parent, directory));
+    directory.append(new_dirent.dirent_disk());
+    EXT_RPC(ec->put(parent, directory));
+
+release:
     return r;
 }
 
@@ -166,13 +232,32 @@ int
 yfs_client::lookup(inum parent, const char *name, bool &found, inum &ino_out)
 {
     int r = OK;
+    std::string fname(name);
+    std::list<dirent> list;
+    std::list<dirent>::iterator it;
+    printf("> yfs_client::lookup parent inum: %016llx, file name: %s\n", parent, name);
 
     /*
      * your code goes here.
      * note: lookup file from parent dir according to name;
      * you should design the format of directory content.
      */
+    if ((r = readdir(parent, list)) != OK) {
+        goto release;
+    }
 
+    for (it = list.begin(); it != list.end(); ++it) {
+        if (fname == it->name) {
+            found = true;
+            ino_out = it->inum;
+            goto release;
+        }
+    }
+
+    found = false;
+
+release:
+    printf("> yfs_client::lookup: finish\n");
     return r;
 }
 
@@ -180,6 +265,7 @@ int
 yfs_client::readdir(inum dir, std::list<dirent> &list)
 {
     int r = OK;
+    printf("> yfs_client::readdir: dir: %016llx\n", dir);
 
     /*
      * your code goes here.
@@ -187,6 +273,39 @@ yfs_client::readdir(inum dir, std::list<dirent> &list)
      * and push the dirents to the list.
      */
 
+    unsigned int i = 0;
+    std::string buf;
+    EXT_RPC(ec->get(dir, buf));
+
+    // parse directory
+    std::cout << "directory content: " << buf << std::endl;
+    while (i < buf.size()) {
+        unsigned int dirent_size = 0;
+        unsigned int name_size   = 0;
+        dirent dirent;
+
+        // read dirent size
+        for (; buf[i] != ' '; ++i) {
+            dirent_size = dirent_size * 10 + buf[i] - '0';
+        }
+        ++i;
+        // read name size
+        for (; buf[i] != '/'; ++i) {
+            name_size = name_size * 10 + buf[i] - '0';
+        }
+        ++i;
+
+        std::cout << i << " " << dirent_size
+                  << " " << name_size << std::endl;
+        dirent.name = buf.substr(i, name_size);
+        i += name_size;
+        dirent.inum = n2i(buf.substr(i, dirent_size - name_size));
+        i += dirent_size - name_size;
+        list.push_back(dirent);
+    }
+
+release:
+    printf("> yfs_client::readir: finish\n");
     return r;
 }
 
@@ -194,12 +313,43 @@ int
 yfs_client::read(inum ino, size_t size, off_t off, std::string &data)
 {
     int r = OK;
+    std::string buf;
+    extent_protocol::attr attr;
+    unsigned int off_to_end;
+    unsigned int read_len;
+
+    printf("> yfs_client::read: ino: %016llx, off: %ld, size: %lu\n", ino, off, size);
 
     /*
      * your code goes here.
      * note: read using ec->get().
      */
 
+    data = "";
+
+    EXT_RPC(ec->getattr(ino, attr));
+
+    std::cout << "> read file's size: " << attr.size  << std::endl;
+
+    EXT_RPC(ec->get(ino, buf));
+
+    if (off > attr.size) {
+        data = "";
+        goto release;
+    }
+
+    std::cout << "> yfs_client::read:"
+              << " origin size: " << buf.size()
+              << " file content: " << buf << std::endl;
+
+    off_to_end = buf.size() - off;
+    read_len = off_to_end < size ? off_to_end : size;
+    data = buf.substr(off, read_len);
+
+    std::cout << "> yfs_client::read finish: size: " << data.size()
+              << "read content " << data << std::endl;
+
+release:
     return r;
 }
 
@@ -208,13 +358,43 @@ yfs_client::write(inum ino, size_t size, off_t off, const char *data,
         size_t &bytes_written)
 {
     int r = OK;
+    std::string buf;
+    std::string new_content(data);
+    extent_protocol::attr attr;
+    unsigned int enlarged_len;
 
+    printf("> yfs_client::write: ino: %016llx, off: %lu, size: %lu", ino, off, size);
     /*
      * your code goes here.
      * note: write using ec->put().
      * when off > length of original file, fill the holes with '\0'.
      */
+    bytes_written = 0;
 
+    EXT_RPC(ec->getattr(ino, attr));
+
+    EXT_RPC(ec->get(ino, buf));
+
+    enlarged_len = off + size > attr.size ? 
+                    off + size - attr.size :
+                    0;
+    
+    std::cout << "> write: file old size: " << buf.size() << std::endl;
+    std::cout << "> write: file old content: " << buf << std::endl;
+    buf.append(enlarged_len, 0);
+    buf.replace(off, size, data, size);
+    std::cout << "> write: file new size: " << buf.size() << std::endl;
+
+    EXT_RPC(ec->put(ino, buf));
+
+    bytes_written = size;
+
+    std::cout << "> write: file new size " << buf.size() << std::endl;
+    std::cout << "> yfs_client::write finish: "
+              << "file new size: " << buf.size()
+              << "new file content: " << buf << std::endl;
+
+release:
     return r;
 }
 
@@ -227,7 +407,32 @@ int yfs_client::unlink(inum parent,const char *name)
      * note: you should remove the file using ec->remove,
      * and update the parent directory content.
      */
+    inum inum;
+    bool found;
+    std::list<dirent> dirent_list;
+    std::string buf;
 
+    EXT_RPC(lookup(parent, name, found, inum));
+
+    if (!found) {
+        r = NOENT;
+        goto release;
+    }
+
+    EXT_RPC(ec->remove(inum));
+
+    EXT_RPC(readdir(parent, dirent_list));
+
+    for (std::list<dirent>::iterator it = dirent_list.begin();
+         it != dirent_list.end();
+         ++it) {
+        if (inum != it->inum) {
+            buf.append(it->dirent_disk());
+        }
+    }
+
+    EXT_RPC(ec->put(parent, buf));
+
+release:
     return r;
 }
-

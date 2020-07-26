@@ -77,4 +77,3 @@ int extent_server::remove(extent_protocol::extentid_t id, int &)
  
   return extent_protocol::OK;
 }
-
