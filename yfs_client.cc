@@ -53,9 +53,11 @@ yfs_client::isfile(inum inum)
         printf("isfile: %lld is a file\n", inum);
         return true;
     } 
-    printf("isfile: %lld is a dir\n", inum);
+    printf("isfile: %lld is not a file\n", inum);
     return false;
 }
+
+
 /** Your code here for Lab...
  * You may need to add routines such as
  * readlink, issymlink here to implement symbolic link.
@@ -66,7 +68,19 @@ bool
 yfs_client::isdir(inum inum)
 {
     // Oops! is this still correct when you implement symlink?
-    return ! isfile(inum);
+    extent_protocol::attr a;
+
+    if (ec->getattr(inum, a) != extent_protocol::OK) {
+        printf("error getting attr\n");
+        return false;
+    }
+
+    if (a.type == extent_protocol::T_DIR) {
+        printf("isDir: %lld is a directory\n", inum);
+        return true;
+    } 
+    printf("isDir: %lld is not a directory\n", inum);
+    return false;
 }
 
 int
@@ -175,7 +189,12 @@ yfs_client::create(inum parent, const char *name, mode_t mode, inum &ino_out)
         goto release;
     }
 
-    EXT_RPC(ec->create(extent_protocol::T_FILE, ino_out));
+    // create file
+    if (mode == S_IFLNK)
+        EXT_RPC(ec->create(extent_protocol::T_LINK, ino_out));
+    else
+        EXT_RPC(ec->create(extent_protocol::T_FILE, ino_out));
+
 
     // add dirent to parent
     new_dirent.name = name;
@@ -432,6 +451,50 @@ int yfs_client::unlink(inum parent,const char *name)
     }
 
     EXT_RPC(ec->put(parent, buf));
+
+release:
+    return r;
+}
+
+
+int
+yfs_client::symlink(inum parent, const char *name, const char *link)
+{
+    std::cout << "> yfs_client symlink: name : " << name << " link: " << link << std::endl;
+    int r = OK;
+    inum inum;
+    std::string s(link);
+
+    if (create(parent, name, S_IFLNK, inum) != OK) {
+        r = EXIST;
+        goto release;
+    }
+
+    EXT_RPC(ec->put(inum, s));
+
+    std::cout << "> yfs_client symlink finish " << r << std::endl;
+
+release:
+    return r;
+}
+
+int
+yfs_client::readlink(inum ino, std::string &data)
+{
+
+    std::cout << "> yfs_client readlink: " << std::endl;
+    int r = OK;
+
+    // check if file is a symlink ?
+
+    if (isfile(ino) || isdir(ino)) {
+        r = NOENT;
+        goto release;
+    }
+
+    EXT_RPC(ec->get(ino, data));
+
+    std::cout << "> yfs_client readlink finish: content: " << data << std::endl;
 
 release:
     return r;

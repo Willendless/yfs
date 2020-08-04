@@ -107,7 +107,7 @@ inode_manager::alloc_inode(uint32_t type)
    */
   inode *inode_disk;
   char block[BLOCK_SIZE];
-  uint32_t i = (type == extent_protocol::T_FILE) ? 2 : 1;
+  uint32_t i = (type == extent_protocol::T_DIR) ? 1 : 2;
 
   for (; i < bm->sb.ninodes; ++i) {
     bm->read_block(IBLOCK(i, bm->sb.nblocks), block);
